@@ -393,12 +393,21 @@ private buildNextState(Double degrees) {
 }
 
 private onOffEvent(Double degrees) {
-	if(degrees > (quickOffTemperature ?: fromCelsiusToLocal(4))) {
+	if(degrees > device.currentValue('temperature')) {
+    	log.debug "||TRV DH|| Switch set to on because requested temperature $degrees is greater than current temperature ${device.currentValue('temperature')}"
 		[name:"switch", value: "on", displayed: false]
+        [name:"thermostatMode", value: "heat", displayed: false]
+        [name:"thermostatOperatingState", value: "heating"]
 	}
 	else {
+    	log.debug "||TRV DH|| Switch set to off because requested temperature $degrees is less than current temperature ${device.currentValue('temperature')}"
 		[name:"switch", value: "off", displayed: false]
+        [name:"thermostatMode", value: "off", displayed: false]
+        [name:"thermostatOperatingState", value: "idle"]
 	}
+    
+	//note that this does not change the text on the tile from "Heating to xxx" or "Off" - that changes when the commands are actually synced to the TRV on the next wake interval
+	//this means you can see what the TRV is actually doing at the moment but all the ST icons and colours work properly still
 }
 
 private setClock() {
