@@ -1,6 +1,14 @@
 /**
- *  Danfoss Living Connect Radiator Thermostat LC-13
+ * This started off originally from the work Tom Philip did and the submission here:
+ * https://github.com/tommysqueak/SmartThingsPublic/blob/master/devicetypes/tommysqueak/danfoss-living-connect-radiator-thermostat.src/danfoss-living-connect-radiator-thermostat.groovy
+ * 
+ * I've never used GitHub so probably got the etiquet wrong here, but wanted to reference who did the lion share of the work!
  *
+ * This was originally for Danfoss Living Connect Radiator Thermostat LC-13, but I want it to work with POPP POPE010101 Z-Wave Radiator Thermostat (TRV)
+ *
+ *  Main difference is POPP can report back actual temperature rather than just set point
+ * 
+ *  Original
  *  Copyright 2016 Tom Philip
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
@@ -12,42 +20,60 @@
  *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
  *  for the specific language governing permissions and limitations under the License.
  *
+ * To Do
+ * 
+ * 
+ * Perhaps writing a smartapp that does scheduling. 
+ * Sort out first time device is installed 0 values screws up the device in the app.
+ * Temperature offset
+ *
+ * CWH Update: (done) Sort out Heating / Idle / Auto states and their impact on the TRV.
  */
+ 
+ 
 metadata {
-	definition (name: "Danfoss Living Connect Radiator Thermostat LC-13 v3", namespace: "tommysqueak", author: "Tom Philip") {
+	definition (name: "POPPTRV", namespace: "tommysqueak", author: "Tom Philip") {
 		capability "Actuator"
 		capability "Sensor"
 		capability "Thermostat"
 		capability "Battery"
 		capability "Configuration"
 		capability "Switch"
-
-		command "temperatureUp"
-		command "temperatureDown"
-		attribute "nextHeatingSetpoint", "number"
-
-		// raw fingerprint zw:S type:0804 mfr:0002 prod:0005 model:0004 ver:1.01 zwv:3.67 lib:06 cc:80,46,81,72,8F,75,43,86,84 ccOut:46,81,8F
-		fingerprint type: "0804", mfr: "0002", prod: "0005", model: "0004", cc: "80,46,81,72,8F,75,43,86,84", ccOut:"46,81,8F"
+		capability "Temperature Measurement"
+		
+    command "temperatureUp"
+	command "temperatureDown"
+    command "setHeatingSetpoint"
+		
+    attribute "nextHeatingSetpoint", "number"
+    attribute "temperature", "number"
+        	
+    fingerprint type: "0804", mfr: "0002", prod: "0115", model: "A010", cc: "80,46,81,72,8F,75,31,43,86,84", ccOut:"46,81,8F"
+        
 		// 0x80 = Battery v1
 		// 0x46 = Climate Control Schedule v1
 		// 0x81 = Clock v1
 		// 0x72 = Manufacturer Specific v1
 		// 0x8F = Multi Cmd v1 (Multi Command Encapsulated)
 		// 0x75 = Protection v2
+    // 0x31 V2 0x31 Sensor Multilevel
 		// 0x43 = Thermostat Setpoint v2
 		// 0x86 = Version v1
 		// 0x84 = Wake Up v2
 	}
 
 	simulator {
-
 	}
 
 	// http://scripts.3dgo.net/smartthings/icons/
 	//	TODO: create temp set like Nest thermostat - http://docs.smartthings.com/en/latest/device-type-developers-guide/tiles-metadata.html
-	tiles(scale: 2) {
+	//nextHeatingSetpoint to temp1
+  
+  // Tried to mirror Nest http://thingsthataresmart.wiki/index.php?title=Nest_Manager#Nest_Thermostat
+  
+    tiles(scale: 2) {
 		multiAttributeTile(name:"richtemp", type:"thermostat", width:6, height:4) {
-			tileAttribute("device.nextHeatingSetpoint", key: "PRIMARY_CONTROL") {
+			tileAttribute("device.temperature", key: "PRIMARY_CONTROL") {
 				attributeState("default", label:'${currentValue}°',
 					backgroundColors:[
 						// Celsius Color Range
@@ -87,14 +113,16 @@ metadata {
 				attributeState("off", label:"off", backgroundColor:"#1e9cbb", icon:"st.thermostat.heating-cooling-off")
 			}
 
-			tileAttribute("device.heatingSetpoint", key: "HEATING_SETPOINT") {
+			tileAttribute("device.nextHeatingSetpoint", key: "HEATING_SETPOINT") {
 					attributeState("default", label:'${currentValue}', unit:"°C")
 			}
 		}
 
-		valueTile("battery", "device.battery", inactiveLabel: false, height: 2, width: 3, decoration: "flat") {
+	valueTile("battery", "device.battery", inactiveLabel: false, height: 2, width: 3, decoration: "flat") {
 			state "battery", label:'${currentValue}% battery', unit:""
 		}
+
+		
 
 		standardTile("switcher", "device.switch", height: 2, width: 2, decoration: "flat") {
 			state("off", action:"on", label: "off", icon: "st.thermostat.cool", backgroundColor:"#ffffff")
@@ -102,6 +130,7 @@ metadata {
 		}
 
 		main "switcher"
+        
 		details(["richtemp", "battery"])
 	}
 
@@ -143,7 +172,7 @@ metadata {
 // All messages from the device are passed to the parse method.
 // It is responsible for turning those messages into something the SmartThings platform can understand.
 def parse(String description) {
-	log.debug "Parsing '${description}'"
+	log.debug "||TRV DH|| Parsing '${description}'"
 
 	def result = null
 	//	The commands in the array are to map to versions of the command class. eg physicalgraph.zwave.commands.wakeupv1 vs physicalgraph.zwave.commands.wakeupv2
@@ -151,10 +180,10 @@ def parse(String description) {
 	def cmd = zwave.parse(description)
 	if (cmd) {
 		result = zwaveEvent(cmd)
-		log.debug "Parsed ${cmd} to ${result.inspect()}"
+		log.debug "||TRV DH|| Parsed ${cmd} to ${result.inspect()}"
 	}
 	else {
-		log.debug "Non-parsed event: ${description}"
+		log.debug "||TRV DH|| Non-parsed event: ${description}"
 	}
 	result
 }
@@ -178,7 +207,7 @@ def zwaveEvent(physicalgraph.zwave.commands.thermostatsetpointv2.ThermostatSetpo
 	def currentTemperature = currentDouble("heatingSetpoint")
 	def nextTemperature = currentDouble("nextHeatingSetpoint")
 
-	log.debug "SetpointReport. current:${currentTemperature} next:${nextTemperature} radiator:${radiatorTemperature}"
+	log.debug "||TRV DH|| SetpointReport. current:${currentTemperature} next:${nextTemperature} radiator:${radiatorTemperature}"
 
 	def deviceTempMap = [name: "heatingSetpoint", value: radiatorTemperature, unit: getTemperatureScale()]
 
@@ -199,8 +228,8 @@ def zwaveEvent(physicalgraph.zwave.commands.thermostatsetpointv2.ThermostatSetpo
 	}
 
 	eventList << createEvent(deviceTempMap)
-	//	For acting like a thermostat
-	eventList << createEvent(name: "temperature", value: radiatorTemperature, unit: getTemperatureScale(), displayed: false)
+	//	For acting like a thermostat // removed next line
+	//eventList << createEvent(name: "temperature", value: radiatorTemperature, unit: getTemperatureScale(), displayed: false)
 	eventList << createEvent(name: "thermostatSetpoint", value: radiatorTemperature, unit: getTemperatureScale(), displayed: false)
 	def switchState = onOffEvent(radiatorTemperature).value
 	eventList << createEvent(name: "thermostatMode", value: (switchState == "on") ? "heat" : "off", displayed: false)
@@ -215,25 +244,67 @@ def zwaveEvent(physicalgraph.zwave.commands.thermostatsetpointv2.ThermostatSetpo
 	eventList
 }
 
+/*
+*
+* This is the bit i've added that grabs the actual temperature from the TRV.
+* 
+*/
+
+def zwaveEvent(physicalgraph.zwave.commands.sensormultilevelv5.SensorMultilevelReport cmd) {
+	log.debug "||TRV DH|| def:sensormultilevelreport to get current temp from Popp TRVs"
+    log.debug "||TRV DH|| zwaveEvent(physicalgraph.zwave.commands.sensormultilevelv5.SensorMultilevelReport $cmd)"
+
+	def events = []
+
+	if (cmd.sensorType == 0x01) {
+		def reportedTemperatureValue = cmd.scaledSensorValue
+		def reportedTemperatureUnit = cmd.scale == 1 ? "F" : "C"
+
+		def convertedTemperatureValue = convertTemperatureIfNeeded(reportedTemperatureValue, reportedTemperatureUnit, 2)
+
+		def descriptionText = "$device.displayName temperature was $convertedTemperatureValue°" + getTemperatureScale() + "."
+
+		events << createEvent(name: "temperature", value: convertedTemperatureValue, descriptionText: descriptionText, translatable: true)
+        
+        //Update the thermostat states so the app shows the right info - also sits in the onOffEvent sub
+        if (device.currentValue('temperature') > device.currentValue('nextHeatingSetpoint')) {
+       		events << createEvent(name:'thermostatMode', value: 'off', displayed: false)
+        	events << createEvent(name:'thermostatOperatingState', value: 'idle')
+    	} else {
+       		events << createEvent(name:'thermostatMode', value: 'heat', displayed: false)
+        	events << createEvent(name:'thermostatOperatingState', value: 'heating')                
+		}
+
+        
+
+}
+
+	return events
+
+}
+
+//End Add
+
+
 def zwaveEvent(physicalgraph.zwave.commands.wakeupv2.WakeUpNotification cmd) {
-	log.debug "Wakey wakey"
+	log.debug "||TRV DH|| def: wakeup (Wakey wakey)"
 
   def event = createEvent(descriptionText: "${device.displayName} woke up", displayed: false)
   def cmds = []
 
 	// Only ask for battery if we haven't had a BatteryReport in a while
 	if (!state.lastBatteryReportReceivedAt || (new Date().time) - state.lastBatteryReportReceivedAt > daysToTime(7)) {
-		log.debug "Asking for battery report"
+		log.debug "||TRV DH|| Asking for battery report"
 		cmds << zwave.batteryV1.batteryGet().format()
 	}
 
   //	Send the new temperature, if we haven't yet sent it
-  log.debug "New temperature check. Next: ${device.currentValue("nextHeatingSetpoint")} vs Current: ${device.currentValue("heatingSetpoint")}"
+  log.debug "||TRV DH|| New temperature check. Next: ${device.currentValue("nextHeatingSetpoint")} vs Current: ${device.currentValue("heatingSetpoint")}"
 
 	def nextHeatingSetpoint = currentDouble("nextHeatingSetpoint")
 	def heatingSetpoint = currentDouble("heatingSetpoint")
 	if (nextHeatingSetpoint != 0 && nextHeatingSetpoint != heatingSetpoint) {
-		log.debug "Sending new temperature ${nextHeatingSetpoint}"
+		log.debug "||TRV DH|| Sending new temperature ${nextHeatingSetpoint}"
 		state.lastSentTemperature = nextHeatingSetpoint
 		cmds << setHeatingSetpointCommand(nextHeatingSetpoint).format()
 		cmds << zwave.thermostatSetpointV1.thermostatSetpointGet(setpointType: 1).format()
@@ -286,14 +357,22 @@ def setHeatingSetpoint(degrees) {
 }
 
 def setHeatingSetpoint(Double degrees) {
-	log.debug "Storing temperature for next wake ${degrees}"
+	log.debug "||TRV DH|| Storing temperature for next wake ${degrees}"
 
 	sendEvent(name:"nextHeatingSetpoint", value: degrees.round(1), unit: getTemperatureScale())
 	sendEvent(onOffEvent(degrees))
+
+	if (device.currentValue('temperature') > device.currentValue('nextHeatingSetpoint')) {
+       		sendEvent(name:'thermostatMode', value: 'off', displayed: false)
+        	sendEvent(name:'thermostatOperatingState', value: 'idle')
+    } else {
+       		sendEvent(name:'thermostatMode', value: 'heat', displayed: false)
+        	sendEvent(name:'thermostatOperatingState', value: 'heating')                
+	}
 }
 
 def setHeatingSetpointCommand(Double degrees) {
-	log.trace "setHeatingSetpoint ${degrees}"
+	log.trace "||TRV DH|| setHeatingSetpoint ${degrees}"
 	def deviceScale = state.scale ?: 0
 	def deviceScaleString = deviceScale == 1 ? "F" : "C"
 	def locationScale = getTemperatureScale()
@@ -354,7 +433,7 @@ def auto() {
 }
 
 def installed() {
-	log.debug "installed"
+	log.debug "||TRV DH|| def:installed"
 	delayBetween([
   	//	Not sure if this is needed :/
     zwave.configurationV1.configurationSet(parameterNumber:1, size:2, scaledConfigurationValue:100).format(),
@@ -371,12 +450,12 @@ def installed() {
 }
 
 def updated() {
-	log.debug("updated")
+	log.debug("||TRV DH|| def:updated")
 	response(configure())
 }
 
 def configure() {
-	log.debug("configure")
+	log.debug("||TRV DH|| def:configure")
 	def wakeUpEvery = (wakeUpIntervalInMins ?: 5) * 60
 	[
     zwave.wakeUpV1.wakeUpIntervalSet(seconds:wakeUpEvery, nodeid:zwaveHubNodeId).format()
@@ -393,27 +472,25 @@ private buildNextState(Double degrees) {
 }
 
 private onOffEvent(Double degrees) {
+	//Update the thermostat states so the app shows the right info - also sits in the zWave report sub
 	if(degrees > device.currentValue('temperature')) {
-    	log.debug "||TRV DH|| Switch set to on because requested temperature $degrees is greater than current temperature ${device.currentValue('temperature')}"
-		[name:"switch", value: "on", displayed: false]
-        [name:"thermostatMode", value: "heat", displayed: false]
-        [name:"thermostatOperatingState", value: "heating"]
+    	//log.debug "||TRV DH|| Switch set to on because requested temperature $degrees is greater than current temperature ${device.currentValue('temperature')}"
+		[name:'switch', value: 'on', displayed: false]
+
 	}
 	else {
-    	log.debug "||TRV DH|| Switch set to off because requested temperature $degrees is less than current temperature ${device.currentValue('temperature')}"
-		[name:"switch", value: "off", displayed: false]
-        [name:"thermostatMode", value: "off", displayed: false]
-        [name:"thermostatOperatingState", value: "idle"]
+    	//log.debug "||TRV DH|| Switch set to off because requested temperature $degrees is less than current temperature ${device.currentValue('temperature')}"
+		[name:'switch', value: 'off', displayed: false]
+
 	}
     
-	//note that this does not change the text on the tile from "Heating to xxx" or "Off" - that changes when the commands are actually synced to the TRV on the next wake interval
-	//this means you can see what the TRV is actually doing at the moment but all the ST icons and colours work properly still
+
 }
 
 private setClock() {
-	// set the clock once a week
+	// set the clock once a day
 	def now = new Date().time
-	if (!state.lastClockSet || now - state.lastClockSet > daysToTime(7)) {
+	if (!state.lastClockSet || now - state.lastClockSet > daysToTime(1)) {
 		state.lastClockSet = now
 		currentTimeCommand()
 	}
@@ -437,7 +514,7 @@ private fromCelsiusToLocal(Double degrees) {
 
 private currentTimeCommand() {
     def nowCalendar = Calendar.getInstance(location.timeZone)
-    log.debug "Setting clock to ${nowCalendar.getTime().format("dd-MM-yyyy HH:mm z", location.timeZone)}"
+    log.debug "||TRV DH|| Setting clock to ${nowCalendar.getTime().format("dd-MM-yyyy HH:mm z", location.timeZone)}"
     def weekday = nowCalendar.get(Calendar.DAY_OF_WEEK) - 1
     if (weekday == 0) {
         weekday = 7
